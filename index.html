@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="utf-8" />
+  <title>Cestovné poriadky – interaktívne</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, calibri;
+      line-height: 1.5;
+      margin: 0;
+      padding: 1rem;
+      background: #f9fafb;
+      color: #111;
+    }
+    h1 { font-size: 1.75rem; margin: 0 0 1rem; }
+
+    select, button {
+      font-size: 1rem;
+      padding: 0.4rem 0.6rem;
+      margin: 0.25rem;
+    }
+
+    #container { display: flex; flex-wrap: nowrap; gap: 2rem; margin-top: 1rem; }
+
+    #stops {
+      flex: 0 0 330px;
+      border: 1px solid #ddd;
+      border-radius: 0.25rem;
+      width: auto;
+      background: #fff;
+      padding: 0.25rem;
+      max-height: 550px;
+      overflow-y: auto;
+    }
+
+    .stop-row {
+      display: flex;
+      align-items: center;
+      margin: 0.18rem 0;
+    }
+
+    .stop-row .chrono {
+      width: 30px;
+      background: #FFE5B4;
+      font-size: 1.0rem;
+      text-align: center;
+      padding: 0.4rem 0.2rem;
+      user-select: none;
+      border-radius: 0.25rem 0 0 0.25rem;
+    }
+
+    .stop-row .chrono.highlight {
+      font-weight: bold;
+    }
+
+    .stop-row button {
+      flex: 1;
+      text-align: left;
+      border: none;
+      font-size: 1.1rem;
+      background: #fff;
+      padding: 0.45rem 0.5rem;
+      border-radius: 0 0.25rem 0.25rem 0;
+      cursor: pointer;
+      box-shadow: 0 1px 2px rgba(0,0,0,.08);
+      line-height: 1.25;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .stop-row button:hover   { background: #e2e8f0; }
+    .stop-row button.selected{ background-color: #FFE5B4; }
+
+    #infoContainer { display: flex; flex: 1; gap: 2rem; min-width: 0; }
+
+    #chronometráž {
+      flex: 0 0 70px;
+      background-color: #FFE5B4;
+      border-radius: 0.25rem;
+      padding: 0.25rem;
+      font-size: 1rem;
+      line-height: 1.25;
+      user-select: none;
+      text-align: center;
+    }
+
+    #chronometráž .row { margin-bottom: 0.12rem; }
+    #chronometráž .row.highlight { font-weight: 600; }
+    #chronometráž .spacer {
+      visibility: hidden;
+      margin: 0.18rem 0;
+    }
+
+    #departures {
+      flex: 1;
+      overflow-x: auto;
+      background: #fff;
+      border-radius: 0.25rem;
+      padding: 0.5rem;
+      box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
+    }
+
+    .regime {
+      display:inline-block;
+      vertical-align:top;
+      margin-right:2rem;
+    }
+
+    .regime h2 {
+      font-size: 1.25rem;
+      margin-bottom: 0.55rem;
+    }
+
+    .departures-table th {
+      background: #D9D9D9;
+      width: 1.8rem;
+      text-align: center;
+      font-size: 1.2rem;
+      font-family: calibri;
+    }
+
+    #departures .regime:first-child .departures-table th{
+      background:#FFEFC1;
+    }
+
+    .departures-table td {
+      width: auto;
+      text-align: left;
+      font-size: 1.2rem;
+      font-family: calibri;
+    }
+  </style>
+</head>
+<body>
+  <h1>Cestovné poriadky</h1>
+
+  <label>Linka:
+    <select id="lineSelect"></select>
+  </label>
+
+  <label>Smer:
+    <select id="directionSelect"></select>
+  </label>
+
+  <div id="container">
+    <div id="stops"></div>
+    <div id="infoContainer">
+      <div id="departures"></div>
+    </div>
+  </div>
+
+  <script>
+  (async function(){
+    const data = await fetch('data.json').then(r => r.json());
+    const { Linky, Zastavky, Odchody } = data;
+
+    const dirsByLine  = {};
+    const stopsByDir  = {};
+    const chronoByStop= {};
+    const odchodyByDir= {};
+
+    Linky.forEach(l => {
+      (dirsByLine[l.cislo] ||= []).push(l.smer);
+    });
+
+    Zastavky.forEach(z => {
+      const dirKey = `${z.linka}|${z.smer}`;
+      (stopsByDir[dirKey] ||= []).push({...z});
+      chronoByStop[`${dirKey}|${z.zastavka}`] = Number(z.chronometr) || 0;
+    });
+
+    Odchody.forEach(o => {
+      const dirKey = `${o.linka}|${o.smer}`;
+      (odchodyByDir[dirKey] ||= { PD: [], VD: [] })[o.rezim].push({ hodina: o.hodina, minuty: o.minuty.split(' ') });
+    });
+
+    const lineSelect  = document.getElementById('lineSelect');
+    const directionSelect = document.getElementById('directionSelect');
+    const stopsDiv    = document.getElementById('stops');
+    const depDiv      = document.getElementById('departures');
+
+    let selectedStopBtn = null;
+
+    function clearStops(){ stopsDiv.innerHTML = ''; }
+    function clearDepartures(){ depDiv.innerHTML = ''; }
+
+    Object.keys(dirsByLine).sort((a,b)=>a.localeCompare(b,'sk',{numeric:true}))
+      .forEach(l=> lineSelect.add(new Option(l,l)));
+
+    function fillDirections(){
+      directionSelect.innerHTML='';
+      (dirsByLine[lineSelect.value]||[]).forEach(d=>directionSelect.add(new Option(d,d)));
+    }
+
+    function renderStops() {
+      stopsDiv.innerHTML = '';
+      const key = `${lineSelect.value}|${directionSelect.value}`;
+      const stops = stopsByDir[key] || [];
+
+      stops.forEach((st, i) => {
+        const row = document.createElement('div');
+        row.className = 'stop-row';
+
+        const chrono = document.createElement('div');
+        chrono.className = 'chrono';
+        chrono.textContent = '';
+        row.appendChild(chrono);
+
+        const btn = document.createElement('button');
+        btn.textContent = st.zastavka;
+        btn.onclick = () => {
+          selectedStopBtn?.classList.remove('selected');
+          document.querySelectorAll('.chrono').forEach(el => {
+            el.classList.remove('highlight');
+            el.textContent = '';
+          });
+
+          btn.classList.add('selected');
+          selectedStopBtn = btn;
+
+          let baseChrono = Number(st.chronometr) || 0;
+          for (let j = i; j < stops.length; j++) {
+            const current = stops[j];
+            const c = Number(current.chronometr) || 0;
+            const row = stopsDiv.children[j];
+            const chronoDiv = row.querySelector('.chrono');
+            chronoDiv.textContent = c - baseChrono;
+            if (j === i) chronoDiv.classList.add('highlight');
+          }
+
+          showDepartures(key, st.zastavka);
+        };
+
+        row.appendChild(btn);
+        stopsDiv.appendChild(row);
+      });
+    }
+
+    const toMinutes = (h,m) => Number(h)*60 + Number(m);
+
+    function showDepartures(dirKey, stopName){
+      depDiv.innerHTML = '';
+      const ch = chronoByStop[`${dirKey}|${stopName}`] || 0;
+      const { PD = [], VD = [] } = odchodyByDir[dirKey] || {};
+      if (!PD.length && !VD.length) {
+        depDiv.textContent = 'Žiadne údaje o odchodoch.';
+        return;
+      }
+
+      const regimes = { PD: 'Pracovné dni', VD: 'Voľné dni' };
+      const container = document.createElement('div');
+      container.className = 'regimes-container';
+
+      ['PD','VD'].forEach(rezim => {
+        const odch = odchodyByDir[dirKey]?.[rezim] || [];
+        if (!odch.length) return;
+
+        const sec = document.createElement('div');
+        sec.className = 'regime';
+        sec.innerHTML = `<h2>${regimes[rezim]}</h2>`;
+
+        const tbl = document.createElement('table');
+        tbl.className = 'departures-table';
+
+        const map = {};
+        odch.forEach(({hodina, minuty}) => {
+          minuty.forEach(m => {
+            const total = toMinutes(hodina, m) + ch;
+            const hh = String(Math.floor(total / 60) % 24).padStart(2, '0');
+            const mm = String(total % 60).padStart(2, '0');
+            (map[hh] ||= []).push(mm);
+          });
+        });
+
+        Object.keys(map).sort().forEach(hh => {
+          if (!map[hh].length) return;
+          const tr = document.createElement('tr');
+          const uniqueSorted = [...new Set(map[hh])].sort();
+          tr.innerHTML = `<th>${hh}:</th><td>${uniqueSorted.join(', ')}</td>`;
+          tbl.appendChild(tr);
+        });
+
+        sec.appendChild(tbl);
+        container.appendChild(sec);
+      });
+
+      depDiv.appendChild(container);
+    }
+
+    lineSelect.onchange = () => {
+      fillDirections();
+      clearStops();
+      clearDepartures();
+    };
+
+    directionSelect.onchange = () => {
+      renderStops();
+      clearDepartures();
+    };
+
+    fillDirections();
+    renderStops();
+  })();
+  </script>
+</body>
+</html>
